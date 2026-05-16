@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>OpenAlpha - Quant — IQC 2026 Alpha Engine</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+:root{
+  --bg:#0f0f0f;--surface:#161616;--border:#2a2a2a;
+  --green:#1D9E75;--green-dim:rgba(29,158,117,0.15);
+  --red:#E24B4A;--red-dim:rgba(226,75,74,0.15);
+  --amber:#EF9F27;--amber-dim:rgba(239,159,39,0.15);
+  --blue:#4A90D9;--blue-dim:rgba(74,144,217,0.15);
+  --text:#e2e2e2;--muted:#666;--mono:'JetBrains Mono',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:var(--mono);background:var(--bg);color:var(--text);font-size:13px;line-height:1.6;}
+/* ── HEADER ── */
+header{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;border-bottom:1px solid var(--border);background:var(--surface);position:sticky;top:0;z-index:10;}
+.logo{font-size:16px;font-weight:700;letter-spacing:0.04em;}
+.logo span{color:var(--green);}
+#statusBadge{padding:4px 12px;border-radius:4px;font-size:11px;font-weight:600;letter-spacing:0.08em;border:1px solid var(--border);}
+/* ── CONTROLS ── */
+.controls{display:flex;gap:10px;align-items:center;padding:16px 24px;border-bottom:1px solid var(--border);flex-wrap:wrap;}
+input[type=text]{flex:1;min-width:200px;padding:8px 12px;background:#1a1a1a;border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:var(--mono);font-size:13px;outline:none;}
+input[type=text]:focus{border-color:var(--green);}
+button{padding:8px 18px;border-radius:4px;font-family:var(--mono);font-size:12px;font-weight:600;cursor:pointer;border:none;letter-spacing:0.04em;transition:opacity .15s,transform .1s;}
+button:active{transform:translateY(1px);}
+#startBtn{background:var(--green);color:#fff;}
+#startBtn:disabled{opacity:0.4;cursor:not-allowed;}
+#stopBtn{background:transparent;border:1px solid var(--red);color:var(--red);}
+#stopBtn:disabled{opacity:0.3;cursor:not-allowed;}
+/* ── STATS ROW ── */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding:16px 24px;}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:14px 16px;}
+.stat-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;}
+.stat-value{font-size:22px;font-weight:700;}
+/* ── ALPHA FEED ── */
+.feed{padding:0 24px 40px;}
+.feed-title{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;padding:12px 0 10px;}
+.alpha-card{background:var(--surface);border:1px solid var(--border);border-radius:6px;margin-bottom:12px;overflow:hidden;}
+.alpha-card.submit{border-left:3px solid var(--green);}
+.alpha-card.advance{border-left:3px solid var(--blue);}
+.alpha-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;cursor:pointer;gap:12px;}
+.alpha-id{font-weight:700;font-size:14px;}
+.alpha-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.badge{display:inline-block;padding:3px 8px;border-radius:3px;font-size:10px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;}
+.badge-submit{background:var(--green-dim);color:var(--green);border:1px solid var(--green);}
+.badge-advance{background:var(--blue-dim);color:var(--blue);border:1px solid var(--blue);}
+.badge-corr-low{background:var(--green-dim);color:var(--green);}
+.badge-corr-med{background:var(--amber-dim);color:var(--amber);}
+.badge-corr-high{background:var(--red-dim);color:var(--red);}
+.badge-family{background:#1a1a2e;color:#8080ff;border:1px solid #3333aa;}
+.alpha-metrics-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:0 16px 10px;}
+.mini-metric{background:#0f0f0f;border:1px solid var(--border);border-radius:4px;padding:8px 10px;text-align:center;}
+.mini-label{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;}
+.mini-value{font-size:13px;font-weight:600;color:var(--green);}
+.collapsible{display:none;border-top:1px solid var(--border);}
+.collapsible.open{display:block;}
+.section-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;padding:10px 16px 4px;}
+pre.expression{background:#0a0a0a;border:none;padding:10px 16px;font-size:12px;color:#7dd3fc;overflow-x:auto;white-space:pre-wrap;word-break:break-all;}
+table.fp-table{width:100%;border-collapse:collapse;margin:0 0 10px;}
+table.fp-table td{padding:4px 16px;font-size:11px;border-bottom:1px solid #1a1a1a;}
+table.fp-table td:first-child{color:var(--muted);width:40%;}
+table.fp-table td:last-child{color:var(--text);}
+.ts{font-size:10px;color:var(--muted);}
+.chevron{font-size:12px;color:var(--muted);transition:transform .2s;}
+.chevron.open{transform:rotate(180deg);}
+/* ── EMPTY STATE ── */
+.empty{text-align:center;padding:60px 20px;color:var(--muted);}
+.empty p{margin-top:10px;font-size:12px;}
+/* ── FOOTER ── */
+footer{text-align:center;padding:12px;color:var(--muted);font-size:10px;border-top:1px solid var(--border);letter-spacing:.04em;}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Alpha<span>Forge</span> <span style="color:var(--muted);font-weight:400;font-size:11px;">IQC 2026</span></div>
+  <div id="statusBadge" style="color:var(--muted);">IDLE</div>
+</header>
+
+<div class="controls">
+  <input type="text" id="focusInput" placeholder="Focus area (e.g. 'liquidity exhaustion', 'volume anomaly', or leave blank for auto)" />
+  <button id="startBtn" onclick="startSession()">▶ Start</button>
+  <button id="stopBtn" onclick="stopSession()" disabled>■ Stop</button>
+</div>
+
+<div class="stats">
+  <div class="stat-card"><div class="stat-label">Cycle</div><div class="stat-value" id="statCycle">—</div></div>
+  <div class="stat-card"><div class="stat-label">Passed</div><div class="stat-value" id="statPassed" style="color:var(--green)">0</div></div>
+  <div class="stat-card"><div class="stat-label">Failed</div><div class="stat-value" id="statFailed" style="color:var(--red)">0</div></div>
+  <div class="stat-card"><div class="stat-label">Status</div><div class="stat-value" id="statStatus" style="font-size:14px;padding-top:4px">—</div></div>
+</div>
+
+<div class="feed">
+  <div class="feed-title">Live Alpha Feed</div>
+  <div id="alphaFeed">
+    <div class="empty" id="emptyState">
+      ⬡<p>No alphas yet. Start a session to begin autonomous research.</p>
+    </div>
+  </div>
+</div>
+
+<footer id="footer">OpenAlpha - Quant · session: <span id="footerSid">none</span> · <span id="footerTs">—</span></footer>
+
+<script>
+const API = '';
+let sessionId = localStorage.getItem('af_session_id') || null;
+let pollInterval = null;
+let knownAlphaIds = new Set();
+let failCount = 0;
+
+const STATUS_COLORS = {
+  IDLE:'#666', GENERATING:'var(--amber)', PARSING:'var(--amber)',
+  VALIDATING:'var(--amber)', ITERATING:'var(--amber)',
+  PASS:'var(--green)', FAIL:'var(--red)',
+  STOPPED:'#666', ERROR:'var(--red)',
+};
+
+// ── Session Management ────────────────────────────────────────────────────────
+async function startSession() {
+  const focus = document.getElementById('focusInput').value.trim() || 'auto';
+  try {
+    const resp = await fetch(`${API}/session/start`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({focus_area: focus}),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { alert('Error: ' + (data.detail || JSON.stringify(data))); return; }
+    sessionId = data.session_id;
+    localStorage.setItem('af_session_id', sessionId);
+    knownAlphaIds.clear();
+    failCount = 0;
+    document.getElementById('footerSid').textContent = sessionId;
+    document.getElementById('startBtn').disabled = true;
+    document.getElementById('stopBtn').disabled = false;
+    document.getElementById('emptyState').style.display = 'none';
+    startPolling();
+  } catch (e) { alert('Failed to start session: ' + e.message); }
+}
+
+async function stopSession() {
+  if (!sessionId) return;
+  try {
+    await fetch(`${API}/session/${sessionId}/stop`, {method:'POST'});
+    stopPolling();
+    document.getElementById('startBtn').disabled = false;
+    document.getElementById('stopBtn').disabled = true;
+    setStatus('STOPPED');
+  } catch (e) { console.error(e); }
+}
+
+// ── Polling ───────────────────────────────────────────────────────────────────
+function startPolling() {
+  if (pollInterval) clearInterval(pollInterval);
+  pollInterval = setInterval(fetchStatus, 2000);
+  fetchStatus();
+}
+
+function stopPolling() {
+  if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+}
+
+async function fetchStatus() {
+  if (!sessionId) return;
+  try {
+    const resp = await fetch(`${API}/session/${sessionId}`);
+    if (!resp.ok) return;
+    const state = await resp.json();
+    updateUI(state);
+    if (['STOPPED','ERROR'].includes(state.status)) {
+      stopPolling();
+      document.getElementById('startBtn').disabled = false;
+      document.getElementById('stopBtn').disabled = true;
+    }
+  } catch (e) { console.warn('Poll error:', e); }
+}
+
+// ── UI Updates ────────────────────────────────────────────────────────────────
+function updateUI(state) {
+  document.getElementById('statCycle').textContent = state.cycle || '—';
+  document.getElementById('statPassed').textContent = (state.passed_alphas || []).length;
+
+  // Calculate fail count as (cycles - passes - 1) approx
+  const passed = (state.passed_alphas || []).length;
+  document.getElementById('statFailed').textContent = Math.max(0, (state.cycle || 0) - passed);
+  document.getElementById('statStatus').textContent = state.status;
+  setStatus(state.status);
+
+  const ts = state.created_at ? new Date(state.created_at).toLocaleString() : '—';
+  document.getElementById('footerTs').textContent = ts;
+  document.getElementById('footerSid').textContent = sessionId || 'none';
+
+  // Render new alphas (newest first)
+  const alphas = [...(state.passed_alphas || [])].reverse();
+  for (const alpha of alphas) {
+    if (!knownAlphaIds.has(alpha.alpha_id)) {
+      knownAlphaIds.add(alpha.alpha_id);
+      prependAlphaCard(alpha);
+    }
+  }
+
+  if (knownAlphaIds.size > 0) {
+    document.getElementById('emptyState').style.display = 'none';
+  }
+}
+
+function setStatus(status) {
+  const badge = document.getElementById('statusBadge');
+  badge.textContent = status;
+  badge.style.color = STATUS_COLORS[status] || '#666';
+  badge.style.borderColor = STATUS_COLORS[status] || '#2a2a2a';
+}
+
+// ── Alpha Card Rendering ──────────────────────────────────────────────────────
+function prependAlphaCard(alpha) {
+  const feed = document.getElementById('alphaFeed');
+  const empty = document.getElementById('emptyState');
+  if (empty) empty.style.display = 'none';
+
+  const m = alpha.metrics || {};
+  const fp = alpha.fingerprint || {};
+  const isSubmit = alpha.decision === 'SUBMIT CANDIDATE';
+  const cardClass = isSubmit ? 'submit' : 'advance';
+  const badgeClass = isSubmit ? 'badge-submit' : 'badge-advance';
+  const badgeLabel = isSubmit ? 'SUBMIT ✓' : 'TEST ▶';
+
+  const sharpe = fmt(m.sharpe_min, m.sharpe_max);
+  const turnover = fmtPct(m.turnover_min, m.turnover_max);
+  const fitness = fmt(m.fitness_min, m.fitness_max);
+  const corrRisk = (m.corr_risk || '').toUpperCase();
+  const corrClass = corrRisk === 'LOW' ? 'badge-corr-low' : corrRisk === 'HIGH' ? 'badge-corr-high' : 'badge-corr-med';
+  const ts = alpha.timestamp ? new Date(alpha.timestamp).toLocaleTimeString() : '';
+  const family = alpha.family || '';
+
+  const id = 'card_' + alpha.alpha_id.replace(/\W/g,'');
+
+  const card = document.createElement('div');
+  card.className = `alpha-card ${cardClass}`;
+  card.id = id;
+  card.innerHTML = `
+    <div class="alpha-header" onclick="toggleCard('${id}')">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span class="alpha-id">${esc(alpha.alpha_id)}</span>
+        <span class="badge ${badgeClass}">${badgeLabel}</span>
+        ${family ? `<span class="badge badge-family">${esc(family)}</span>` : ''}
+        <span class="badge ${corrClass}">${corrRisk || '—'}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <span class="ts">${ts} · cycle ${alpha.cycle_num}</span>
+        <span class="chevron" id="chev_${id}">▼</span>
+      </div>
+    </div>
+    <div class="alpha-metrics-row">
+      <div class="mini-metric"><div class="mini-label">Sharpe</div><div class="mini-value">${sharpe}</div></div>
+      <div class="mini-metric"><div class="mini-label">Fitness</div><div class="mini-value" style="color:var(--blue)">${fitness}</div></div>
+      <div class="mini-metric"><div class="mini-label">Turnover</div><div class="mini-value" style="color:var(--amber)">${turnover}</div></div>
+    </div>
+    <div class="collapsible" id="body_${id}">
+      <div class="section-label">FAST EXPRESSION</div>
+      <pre class="expression">${esc(alpha.expression || '—')}</pre>
+      <div class="section-label">STRUCTURAL FINGERPRINT</div>
+      <table class="fp-table">
+        <tr><td>Dataset</td><td>${esc(fp.dataset||'—')}</td></tr>
+        <tr><td>Topology</td><td>${esc(fp.topology||'—')}</td></tr>
+        <tr><td>Temporal</td><td>${esc(fp.temporal||'—')}</td></tr>
+        <tr><td>Normalization</td><td>${esc(fp.normalization||'—')}</td></tr>
+        <tr><td>Direction</td><td>${esc(fp.direction||'—')}</td></tr>
+        <tr><td>Neutral</td><td>${esc(fp.neutral||'—')}</td></tr>
+      </table>
+      <div class="section-label">RATIONALE</div>
+      <div style="padding:6px 16px 14px;font-size:12px;color:#aaa;line-height:1.7;">${esc(alpha.rationale||'—')}</div>
+    </div>
+  `;
+  // Insert at top (newest first)
+  const firstCard = feed.querySelector('.alpha-card');
+  if (firstCard) feed.insertBefore(card, firstCard);
+  else feed.appendChild(card);
+}
+
+function toggleCard(id) {
+  const body = document.getElementById('body_' + id);
+  const chev = document.getElementById('chev_' + id);
+  if (!body) return;
+  body.classList.toggle('open');
+  chev.classList.toggle('open');
+}
+
+// ── Utils ─────────────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function fmt(lo, hi) {
+  if (lo == null) return '—';
+  return hi && hi !== lo ? `${lo}–${hi}` : String(lo);
+}
+function fmtPct(lo, hi) {
+  if (lo == null) return '—';
+  return hi && hi !== lo ? `${lo}–${hi}%` : `${lo}%`;
+}
+
+// ── Resume on page reload ──────────────────────────────────────────────────────
+window.addEventListener('load', () => {
+  if (sessionId) {
+    document.getElementById('footerSid').textContent = sessionId;
+    fetchStatus().then(() => startPolling());
+    document.getElementById('stopBtn').disabled = false;
+    document.getElementById('startBtn').disabled = false;
+  }
+});
+</script>
+</body>
+</html>

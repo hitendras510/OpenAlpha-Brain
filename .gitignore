@@ -1,0 +1,38 @@
+# AlphaForge — Git ignore rules
+
+# Environment — NEVER commit your API key
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env.bak
+
+# Session data (can be large; regenerate locally)
+sessions/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
