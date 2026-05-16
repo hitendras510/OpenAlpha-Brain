@@ -33,6 +33,8 @@ from prompts import (
     build_success_feedback,
 )
 
+MAX_BRAIN_MUTATIONS = 20   # mutations before abandoning an alpha
+
 # Cached BRAIN auth cookies (shared across cycles in a process lifetime)
 _brain_cookies: httpx.Cookies | None = None
 _brain_cookies_lock = asyncio.Lock()
@@ -363,83 +365,67 @@ async def run_loop(session_id: str) -> None:
 
         await sm.save_session(state)
 
-        # ── 7. BRAIN submission ───────────────────────────────────────────────
+        # ── 7. BRAIN submission + 20-mutation improvement loop ───────────────
         if settings.BRAIN_SUBMIT_ENABLED and alpha.simulation_payload:
             state = await sm.load_session(session_id)
             state.status = SessionStatus.SUBMITTING
+            state.brain_mutation_count = 0
+            state.current_brain_alpha_id = None
+            _log(state, "SUBMIT", f"Submitting {alpha_id} to BRAIN…", {"expr": expression[:80]})
             await sm.save_session(state)
 
             brain_result = await _submit_to_brain(alpha, session_id, global_cycle)
-            alpha.brain = brain_result
 
-            # Update the alpha in state.passed_alphas
             state = await sm.load_session(session_id)
+            state.current_brain_alpha_id = brain_result.alpha_id
+            _log_brain_result(state, brain_result, expression, attempt=0)
+            await sm.save_session(state)
+
+            if brain_result.status == BrainSimStatus.FAIL:
+                brain_result = await _brain_improvement_loop(
+                    initial_result=brain_result,
+                    initial_expression=expression,
+                    alpha=alpha,
+                    session_id=session_id,
+                    global_cycle=global_cycle,
+                )
+
+            # Save final result
+            state = await sm.load_session(session_id)
+            alpha.brain = brain_result
             for i, a in enumerate(state.passed_alphas):
                 if a.alpha_id == alpha_id:
                     state.passed_alphas[i] = alpha
                     break
 
-            if brain_result.status == BrainSimStatus.FAIL:
-                # ── Real BRAIN gates failed → targeted ELM mutation ───────────
-                logger.warning(
-                    "[%s] cycle=%d BRAIN gates FAILED: %s",
-                    session_id, global_cycle, brain_result.gate_failures,
-                )
+            if brain_result.status == BrainSimStatus.PASS:
+                state.status = SessionStatus.PASS
+                _log(state, "PASS",
+                     f"Alpha {alpha_id} PASSED all BRAIN checks! "
+                     f"Sharpe={brain_result.real_sharpe:.3f} "
+                     f"Fitness={brain_result.real_fitness:.3f}",
+                     {"brain_id": brain_result.alpha_id})
+            else:
                 state.status = SessionStatus.ITERATING
-
-                # Track how many times we've mutated this specific alpha
-                brain_mutation_attempt = getattr(state, "_brain_mutation_count", 0) + 1
-                state._brain_mutation_count = brain_mutation_attempt  # type: ignore[attr-defined]
-
+                _log(state, "ABANDON",
+                     f"Alpha {alpha_id} exhausted {state.brain_mutation_count} mutations — "
+                     "starting fresh ideation.",
+                     {"failures": brain_result.gate_failures})
                 state.failure_catalog.append({
                     "fingerprint": fingerprint_dict,
-                    "failure_type": "BRAIN_GATE_FAIL",
-                    "metric_value": {
-                        "sharpe":   brain_result.real_sharpe,
-                        "fitness":  brain_result.real_fitness,
-                        "turnover": brain_result.real_turnover,
-                        "returns":  brain_result.real_returns,
-                    },
-                    "mutation_attempt": brain_mutation_attempt,
-                    "brain_checks": brain_result.brain_checks,
-                    "mutation_tried": "pending",
+                    "failure_type": "BRAIN_EXHAUSTED",
+                    "mutations_tried": state.brain_mutation_count,
                 })
+                state.conversation_history.append({
+                    "role": "user",
+                    "content": build_restart_trigger(
+                        global_cycle + 1,
+                        _summarise_rejected([fingerprint_dict] + state.rejected_motifs[-3:])
+                    )
+                })
+            await sm.save_session(state)
 
-                # Build targeted feedback from BRAIN's real check results
-                brain_checks  = brain_result.brain_checks or []
-                error_message = ""
-                # If no checks (simulation ERROR), extract error from gate_failures
-                if not brain_checks and brain_result.gate_failures:
-                    error_message = brain_result.gate_failures[0]
-
-                targeted_feedback = build_brain_failure_feedback(
-                    brain_checks=brain_checks,
-                    expression=expression,
-                    cycle=global_cycle,
-                    real_sharpe=brain_result.real_sharpe,
-                    real_fitness=brain_result.real_fitness,
-                    real_turnover=brain_result.real_turnover,
-                    real_returns=brain_result.real_returns,
-                    brain_alpha_id=brain_result.alpha_id,
-                    mutation_attempt=brain_mutation_attempt,
-                    error_message=error_message,
-                )
-                state.conversation_history.append({"role": "user", "content": targeted_feedback})
-                await sm.save_session(state)
-                await asyncio.sleep(3)
-                continue
-            else:
-                state.status = SessionStatus.PASS
-                logger.info(
-                    "[%s] cycle=%d BRAIN PASS — alpha_id=%s BRAIN_id=%s sharpe=%.3f fitness=%.3f",
-                    session_id, global_cycle, alpha_id,
-                    brain_result.alpha_id,
-                    brain_result.real_sharpe or 0,
-                    brain_result.real_fitness or 0,
-                )
-                await sm.save_session(state)
-
-        await asyncio.sleep(3)  # respect Groq/free-tier RPM limits
+        await asyncio.sleep(3)
 
     # ── Loop completed max cycles ─────────────────────────────────────────────
     state = await sm.load_session(session_id)
@@ -536,10 +522,8 @@ async def _submit_to_brain(alpha, session_id: str, cycle: int) -> "BrainSubmissi
         result.real_drawdown = gate.drawdown
         result.gate_failures = gate.failures
         result.gate_warnings = gate.warnings
-        result.brain_checks  = gate.brain_checks     # raw checks[] for targeted mutation
         result.completed_at  = dt.utcnow()
         result.status        = BrainSimStatus.PASS if gate.passed else BrainSimStatus.FAIL
-
 
     except brain_client.BrainAuthError as exc:
         logger.error("[%s] cycle=%d BRAIN auth error: %s", session_id, cycle, exc)
@@ -560,3 +544,235 @@ async def _submit_to_brain(alpha, session_id: str, cycle: int) -> "BrainSubmissi
         result.error_message = f"Unexpected: {exc}"
 
     return result
+
+
+# ── Activity log helpers ────────────────────────────────────────────────────────────────────────────────────
+
+def _log(state, log_type: str, message: str, detail: dict | None = None) -> None:
+    """Append an event to the session activity_log (max 200 entries)."""
+    from datetime import datetime as dt
+    entry = {
+        "time": dt.utcnow().strftime("%H:%M:%S"),
+        "type": log_type,
+        "message": message,
+    }
+    if detail:
+        entry["detail"] = detail
+    if not hasattr(state, "activity_log") or state.activity_log is None:
+        state.activity_log = []
+    state.activity_log.append(entry)
+    state.activity_log = state.activity_log[-200:]   # keep last 200
+    logger.info("[activity] [%s] %s", log_type, message)
+
+
+def _log_brain_result(state, result, expression: str, attempt: int) -> None:
+    """Log a BRAIN simulation result to the activity log."""
+    checks = getattr(result, "brain_checks", []) or []
+    failures = [c for c in checks if c.get("result") == "FAIL"]
+    passing  = [c for c in checks if c.get("result") == "PASS"]
+    err_msg  = getattr(result, "gate_failures", [])
+
+    if result.status.value == "PASS":
+        _log(state, "BRAIN_PASS",
+             f"BRAIN PASS — Sharpe={result.real_sharpe:.3f} "
+             f"Fitness={result.real_fitness:.3f} TO={result.real_turnover:.1f}%",
+             {"brain_id": result.alpha_id, "attempt": attempt})
+        return
+
+    # Log each failing check separately so UI can show per-check status
+    if failures:
+        for chk in failures:
+            _log(state, "BRAIN_FAIL",
+                 f"BRAIN check FAILED: {chk['name']} "
+                 f"(value={chk.get('value')}, limit={chk.get('limit')})",
+                 {"check": chk["name"], "value": chk.get("value"),
+                  "limit": chk.get("limit"), "attempt": attempt})
+    elif err_msg:
+        _log(state, "BRAIN_ERROR", f"BRAIN simulation ERROR: {err_msg[0][:120]}",
+             {"attempt": attempt})
+
+    _log(state, "METRICS",
+         f"Real metrics — Sharpe={result.real_sharpe} "
+         f"Fitness={result.real_fitness} TO={result.real_turnover}% "
+         f"Returns={result.real_returns}%",
+         {"sharpe": result.real_sharpe, "fitness": result.real_fitness,
+          "turnover": result.real_turnover, "returns": result.real_returns})
+
+
+# ── 20-mutation BRAIN improvement loop ────────────────────────────────────────────────────
+
+async def _brain_improvement_loop(
+    initial_result,
+    initial_expression: str,
+    alpha,
+    session_id: str,
+    global_cycle: int,
+) -> "BrainSubmissionResult":
+    """
+    After an initial BRAIN FAIL, iteratively mutate and re-submit the same alpha
+    up to MAX_BRAIN_MUTATIONS (20) times before giving up.
+
+    Each iteration:
+      1. Build targeted mutation prompt from real BRAIN check failures
+      2. Call LLM for improved expression
+      3. PATCH existing BRAIN alpha + re-simulate
+      4. Log every step to activity_log
+      5. Return on PASS or after 20 mutations
+    """
+    from datetime import datetime as dt
+    from models import BrainSimStatus, BrainSubmissionResult
+
+    current_result = initial_result
+    current_expression = initial_expression
+    brain_alpha_id = initial_result.alpha_id
+
+    for attempt in range(1, MAX_BRAIN_MUTATIONS + 1):
+        state = await sm.load_session(session_id)
+        state.brain_mutation_count = attempt
+        state.status = SessionStatus.ITERATING
+
+        # Build targeted mutation prompt
+        brain_checks = getattr(current_result, "brain_checks", []) or []
+        error_msg = ""
+        if not brain_checks and current_result.gate_failures:
+            error_msg = current_result.gate_failures[0]
+
+        targeted_prompt = build_brain_failure_feedback(
+            brain_checks=brain_checks,
+            expression=current_expression,
+            cycle=global_cycle,
+            real_sharpe=current_result.real_sharpe,
+            real_fitness=current_result.real_fitness,
+            real_turnover=current_result.real_turnover,
+            real_returns=current_result.real_returns,
+            brain_alpha_id=brain_alpha_id,
+            mutation_attempt=attempt,
+            error_message=error_msg,
+        )
+
+        failed_checks = [c["name"] for c in brain_checks if c.get("result") == "FAIL"]
+        _log(state, "MUTATE",
+             f"Mutation {attempt}/{MAX_BRAIN_MUTATIONS} — fixing: "
+             f"{', '.join(failed_checks) or error_msg[:60]}",
+             {"attempt": attempt, "checks": failed_checks})
+
+        # Append to conversation and call LLM
+        state.conversation_history.append({"role": "user", "content": targeted_prompt})
+        if len(state.conversation_history) > 20:
+            state.conversation_history = state.conversation_history[-20:]
+        await sm.save_session(state)
+
+        try:
+            raw = await llm_client.generate(
+                system_prompt=SYSTEM_PROMPT,
+                history=state.conversation_history[:-1],
+                user_msg=targeted_prompt,
+                session_id=session_id,
+                cycle=global_cycle,
+            )
+        except llm_client.LLMError as exc:
+            logger.error("[%s] LLM error during mutation %d: %s", session_id, attempt, exc)
+            state = await sm.load_session(session_id)
+            _log(state, "ERROR", f"LLM error on mutation {attempt}: {exc}")
+            await sm.save_session(state)
+            await asyncio.sleep(5)
+            continue
+
+        # Parse just the expression from response
+        import re
+        expr_match = re.search(
+            r"(?:expression|alpha)[:\s]+([^\n]+group_neutralize[^\n]+)",
+            raw, re.IGNORECASE
+        )
+        if not expr_match:
+            # Fall back: find any line with group_neutralize
+            for line in raw.splitlines():
+                if "group_neutralize" in line.lower():
+                    expr_match = re.search(r"(group_neutralize\(.+\))", line)
+                    if expr_match:
+                        break
+
+        if not expr_match:
+            state = await sm.load_session(session_id)
+            _log(state, "ERROR",
+                 f"Mutation {attempt}: could not parse expression from LLM — retrying")
+            await sm.save_session(state)
+            await asyncio.sleep(3)
+            continue
+
+        new_expression = expr_match.group(1).strip().rstrip(",;")
+        state = await sm.load_session(session_id)
+        _log(state, "LLM",
+             f"Mutation {attempt} expression: {new_expression[:80]}…",
+             {"expression": new_expression})
+        await sm.save_session(state)
+
+        # PATCH + re-simulate
+        try:
+            async with _brain_cookies_lock:
+                if _brain_cookies is None:
+                    _brain_cookies = await brain_client.authenticate(
+                        settings.BRAIN_EMAIL, settings.BRAIN_PASSWORD
+                    )
+
+            state = await sm.load_session(session_id)
+            state.status = SessionStatus.SUBMITTING
+            _log(state, "PATCH",
+                 f"Patching BRAIN alpha {brain_alpha_id} + re-simulating…",
+                 {"brain_id": brain_alpha_id, "attempt": attempt})
+            await sm.save_session(state)
+
+            gate = await brain_client.patch_alpha_and_poll(
+                alpha_id=brain_alpha_id,
+                new_expression=new_expression,
+                simulation_payload=alpha.simulation_payload or {},
+                cookies=_brain_cookies,
+                max_poll_seconds=settings.BRAIN_POLL_TIMEOUT,
+            )
+
+            new_result = BrainSubmissionResult(
+                status=BrainSimStatus.PASS if gate.passed else BrainSimStatus.FAIL,
+                alpha_id=gate.alpha_id or brain_alpha_id,
+                real_sharpe=gate.sharpe,
+                real_fitness=gate.fitness,
+                real_turnover=gate.turnover,
+                real_returns=gate.returns,
+                real_drawdown=gate.drawdown,
+                gate_failures=gate.failures,
+                gate_warnings=gate.warnings,
+                brain_checks=gate.brain_checks,
+                completed_at=dt.utcnow(),
+            )
+
+        except (brain_client.BrainSubmitError, brain_client.BrainPollError) as exc:
+            logger.error("[%s] BRAIN error on mutation %d: %s", session_id, attempt, exc)
+            state = await sm.load_session(session_id)
+            _log(state, "ERROR", f"BRAIN error on mutation {attempt}: {exc}")
+            await sm.save_session(state)
+            await asyncio.sleep(5)
+            continue
+        except Exception as exc:
+            logger.error("[%s] Unexpected error on mutation %d: %s", session_id, attempt, exc)
+            await asyncio.sleep(5)
+            continue
+
+        current_expression = new_expression
+        current_result = new_result
+
+        state = await sm.load_session(session_id)
+        _log_brain_result(state, new_result, new_expression, attempt=attempt)
+        await sm.save_session(state)
+
+        if new_result.status == BrainSimStatus.PASS:
+            logger.info(
+                "[%s] BRAIN PASS on mutation %d — sharpe=%.3f",
+                session_id, attempt, new_result.real_sharpe or 0,
+            )
+            return new_result
+
+        await asyncio.sleep(3)
+
+    # Exhausted 20 mutations
+    logger.warning("[%s] Exhausted %d BRAIN mutations — abandoning alpha",
+                   session_id, MAX_BRAIN_MUTATIONS)
+    return current_result

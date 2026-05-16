@@ -1,315 +1,519 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>OpenAlpha - Quant — IQC 2026 Alpha Engine</title>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<meta charset="UTF-8">
+<title>OpenAlpha-Quant | Research Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-:root{
-  --bg:#0f0f0f;--surface:#161616;--border:#2a2a2a;
-  --green:#1D9E75;--green-dim:rgba(29,158,117,0.15);
-  --red:#E24B4A;--red-dim:rgba(226,75,74,0.15);
-  --amber:#EF9F27;--amber-dim:rgba(239,159,39,0.15);
-  --blue:#4A90D9;--blue-dim:rgba(74,144,217,0.15);
-  --text:#e2e2e2;--muted:#666;--mono:'JetBrains Mono',monospace;
-}
-*{box-sizing:border-box;margin:0;padding:0;}
-body{font-family:var(--mono);background:var(--bg);color:var(--text);font-size:13px;line-height:1.6;}
-/* ── HEADER ── */
-header{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;border-bottom:1px solid var(--border);background:var(--surface);position:sticky;top:0;z-index:10;}
-.logo{font-size:16px;font-weight:700;letter-spacing:0.04em;}
-.logo span{color:var(--green);}
-#statusBadge{padding:4px 12px;border-radius:4px;font-size:11px;font-weight:600;letter-spacing:0.08em;border:1px solid var(--border);}
-/* ── CONTROLS ── */
-.controls{display:flex;gap:10px;align-items:center;padding:16px 24px;border-bottom:1px solid var(--border);flex-wrap:wrap;}
-input[type=text]{flex:1;min-width:200px;padding:8px 12px;background:#1a1a1a;border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:var(--mono);font-size:13px;outline:none;}
-input[type=text]:focus{border-color:var(--green);}
-button{padding:8px 18px;border-radius:4px;font-family:var(--mono);font-size:12px;font-weight:600;cursor:pointer;border:none;letter-spacing:0.04em;transition:opacity .15s,transform .1s;}
-button:active{transform:translateY(1px);}
-#startBtn{background:var(--green);color:#fff;}
-#startBtn:disabled{opacity:0.4;cursor:not-allowed;}
-#stopBtn{background:transparent;border:1px solid var(--red);color:var(--red);}
-#stopBtn:disabled{opacity:0.3;cursor:not-allowed;}
-/* ── STATS ROW ── */
-.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding:16px 24px;}
-.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:14px 16px;}
-.stat-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;}
-.stat-value{font-size:22px;font-weight:700;}
-/* ── ALPHA FEED ── */
-.feed{padding:0 24px 40px;}
-.feed-title{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;padding:12px 0 10px;}
-.alpha-card{background:var(--surface);border:1px solid var(--border);border-radius:6px;margin-bottom:12px;overflow:hidden;}
-.alpha-card.submit{border-left:3px solid var(--green);}
-.alpha-card.advance{border-left:3px solid var(--blue);}
-.alpha-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;cursor:pointer;gap:12px;}
-.alpha-id{font-weight:700;font-size:14px;}
-.alpha-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
-.badge{display:inline-block;padding:3px 8px;border-radius:3px;font-size:10px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;}
-.badge-submit{background:var(--green-dim);color:var(--green);border:1px solid var(--green);}
-.badge-advance{background:var(--blue-dim);color:var(--blue);border:1px solid var(--blue);}
-.badge-corr-low{background:var(--green-dim);color:var(--green);}
-.badge-corr-med{background:var(--amber-dim);color:var(--amber);}
-.badge-corr-high{background:var(--red-dim);color:var(--red);}
-.badge-family{background:#1a1a2e;color:#8080ff;border:1px solid #3333aa;}
-.alpha-metrics-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:0 16px 10px;}
-.mini-metric{background:#0f0f0f;border:1px solid var(--border);border-radius:4px;padding:8px 10px;text-align:center;}
-.mini-label{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;}
-.mini-value{font-size:13px;font-weight:600;color:var(--green);}
-.collapsible{display:none;border-top:1px solid var(--border);}
-.collapsible.open{display:block;}
-.section-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;padding:10px 16px 4px;}
-pre.expression{background:#0a0a0a;border:none;padding:10px 16px;font-size:12px;color:#7dd3fc;overflow-x:auto;white-space:pre-wrap;word-break:break-all;}
-table.fp-table{width:100%;border-collapse:collapse;margin:0 0 10px;}
-table.fp-table td{padding:4px 16px;font-size:11px;border-bottom:1px solid #1a1a1a;}
-table.fp-table td:first-child{color:var(--muted);width:40%;}
-table.fp-table td:last-child{color:var(--text);}
-.ts{font-size:10px;color:var(--muted);}
-.chevron{font-size:12px;color:var(--muted);transition:transform .2s;}
-.chevron.open{transform:rotate(180deg);}
-/* ── EMPTY STATE ── */
-.empty{text-align:center;padding:60px 20px;color:var(--muted);}
-.empty p{margin-top:10px;font-size:12px;}
-/* ── FOOTER ── */
-footer{text-align:center;padding:12px;color:var(--muted);font-size:10px;border-top:1px solid var(--border);letter-spacing:.04em;}
+  :root {
+    --bg: #0a0e1a; --bg2: #0f1525; --bg3: #161d30;
+    --border: #1e2d4a; --border2: #243558;
+    --text: #c8d4e8; --muted: #5a7090; --white: #e8f0ff;
+    --blue: #3b82f6; --green: #10b981; --red: #ef4444;
+    --yellow: #f59e0b; --purple: #8b5cf6; --cyan: #06b6d4;
+    --orange: #f97316;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  header {
+    background: linear-gradient(135deg, #0f1525 0%, #141e38 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 24px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .logo { font-size: 18px; font-weight: 700; color: var(--white); letter-spacing: -0.3px; }
+  .logo span { color: var(--blue); }
+  .status-badge {
+    padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;
+    letter-spacing: 0.5px; text-transform: uppercase;
+  }
+  .badge-idle      { background: #1e2d4a; color: var(--muted); }
+  .badge-generating { background: #1c2f1a; color: #4ade80; animation: pulse 2s infinite; }
+  .badge-submitting { background: #1a2a3f; color: var(--blue); animation: pulse 2s infinite; }
+  .badge-iterating  { background: #2a1f10; color: var(--orange); animation: pulse 2s infinite; }
+  .badge-pass       { background: #0f2a1a; color: var(--green); }
+  .badge-stopped    { background: #1e1e2e; color: var(--muted); }
+  .badge-error      { background: #2a1010; color: var(--red); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.6} }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    grid-template-rows: auto 1fr;
+    gap: 0;
+    height: calc(100vh - 56px);
+  }
+
+  /* Left sidebar */
+  .sidebar {
+    background: var(--bg2); border-right: 1px solid var(--border);
+    overflow-y: auto; padding: 16px;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+
+  .card {
+    background: var(--bg3); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px;
+  }
+  .card-title {
+    font-size: 10px; font-weight: 600; color: var(--muted);
+    letter-spacing: 1px; text-transform: uppercase; margin-bottom: 12px;
+  }
+
+  .stat-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .stat-label { font-size: 12px; color: var(--muted); }
+  .stat-val { font-size: 13px; font-weight: 600; color: var(--white); font-family: 'JetBrains Mono', monospace; }
+
+  .metric-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .metric-box {
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px; text-align: center;
+  }
+  .metric-name { font-size: 10px; color: var(--muted); margin-bottom: 4px; }
+  .metric-value { font-size: 18px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+  .metric-limit { font-size: 10px; color: var(--muted); margin-top: 2px; }
+  .good { color: var(--green); }
+  .bad  { color: var(--red); }
+  .na   { color: var(--muted); }
+
+  /* BRAIN checks */
+  .check-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 0; border-bottom: 1px solid var(--border);
+    font-size: 12px;
+  }
+  .check-row:last-child { border-bottom: none; }
+  .check-icon { font-size: 14px; width: 18px; flex-shrink: 0; }
+  .check-name { flex: 1; color: var(--text); font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+  .check-vals { font-size: 10px; color: var(--muted); }
+
+  /* Mutation progress bar */
+  .mutation-bar { margin-top: 8px; }
+  .mutation-label { font-size: 11px; color: var(--muted); margin-bottom: 4px; display: flex; justify-content: space-between; }
+  .bar-track { height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; }
+  .bar-fill { height: 100%; background: linear-gradient(90deg, var(--blue), var(--purple)); border-radius: 3px; transition: width 0.5s; }
+
+  /* Right panel */
+  .main-panel {
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* Session start */
+  .start-screen {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 20px;
+  }
+  .start-screen h2 { font-size: 22px; font-weight: 700; color: var(--white); }
+  .start-screen p { color: var(--muted); font-size: 14px; text-align: center; max-width: 400px; }
+  .input-row { display: flex; gap: 10px; width: 100%; max-width: 500px; }
+  .input-row input {
+    flex: 1; background: var(--bg3); border: 1px solid var(--border2);
+    color: var(--white); padding: 10px 14px; border-radius: 8px; font-size: 14px;
+    outline: none; font-family: inherit;
+  }
+  .input-row input:focus { border-color: var(--blue); }
+  .btn {
+    background: var(--blue); color: white; border: none; padding: 10px 20px;
+    border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer;
+    transition: all .2s; font-family: inherit;
+  }
+  .btn:hover { background: #2563eb; transform: translateY(-1px); }
+  .btn-danger { background: #dc2626; }
+  .btn-danger:hover { background: #b91c1c; }
+
+  /* Activity log */
+  .log-header {
+    padding: 12px 20px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--bg2);
+  }
+  .log-title { font-size: 13px; font-weight: 600; color: var(--white); }
+  .log-controls { display: flex; gap: 8px; }
+  .log-btn {
+    padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 500;
+    cursor: pointer; border: 1px solid var(--border2); background: var(--bg3);
+    color: var(--muted); transition: all .15s;
+  }
+  .log-btn.active { background: var(--blue); border-color: var(--blue); color: white; }
+  .log-btn:hover { color: var(--white); }
+
+  .log-body {
+    flex: 1; overflow-y: auto; padding: 8px 0;
+    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+  }
+
+  .log-entry {
+    display: flex; gap: 10px; padding: 5px 20px;
+    border-left: 2px solid transparent;
+    line-height: 1.4;
+    animation: fadeIn .3s ease;
+  }
+  @keyframes fadeIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:none} }
+
+  .log-time { color: var(--muted); flex-shrink: 0; font-size: 11px; padding-top: 1px; }
+  .log-type {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
+    padding: 1px 6px; border-radius: 4px; flex-shrink: 0;
+    height: fit-content; margin-top: 1px;
+  }
+  .log-msg { color: var(--text); word-break: break-word; }
+
+  /* Log type colors */
+  .t-SUBMIT     { background: #1a2d4a; color: var(--blue); border-left-color: var(--blue); }
+  .t-BRAIN_PASS { background: #0f2a1a; color: var(--green); border-left-color: var(--green); }
+  .t-BRAIN_FAIL { background: #2a1010; color: var(--red); border-left-color: var(--red); }
+  .t-BRAIN_ERROR{ background: #2a1010; color: #f87171; border-left-color: var(--red); }
+  .t-MUTATE     { background: #251a38; color: var(--purple); border-left-color: var(--purple); }
+  .t-PATCH      { background: #1a2038; color: var(--cyan); border-left-color: var(--cyan); }
+  .t-LLM        { background: #1a2a1a; color: #86efac; border-left-color: #4ade80; }
+  .t-METRICS    { background: #1a1a2a; color: #a5b4fc; border-left-color: var(--purple); }
+  .t-PASS       { background: #0f2a1a; color: var(--green); border-left-color: var(--green); }
+  .t-ABANDON    { background: #2a1a10; color: var(--orange); border-left-color: var(--orange); }
+  .t-ERROR      { background: #2a1010; color: var(--red); border-left-color: var(--red); }
+  .t-INFO       { background: transparent; color: var(--muted); }
+
+  .expr-box {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 12px; margin-top: 8px; font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: #93c5fd; word-break: break-all; line-height: 1.5;
+  }
+
+  /* Session controls at top of main panel */
+  .session-bar {
+    padding: 10px 20px; border-bottom: 1px solid var(--border);
+    background: var(--bg2); display: flex; align-items: center; gap: 12px;
+  }
+  .session-id { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--muted); }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
 </style>
 </head>
 <body>
 
 <header>
-  <div class="logo">Alpha<span>Forge</span> <span style="color:var(--muted);font-weight:400;font-size:11px;">IQC 2026</span></div>
-  <div id="statusBadge" style="color:var(--muted);">IDLE</div>
+  <div class="logo">OpenAlpha<span>-Quant</span></div>
+  <div style="display:flex;align-items:center;gap:12px">
+    <div id="statusBadge" class="status-badge badge-idle">IDLE</div>
+    <button class="btn btn-danger" id="stopBtn" onclick="stopSession()" style="display:none;padding:6px 14px;font-size:12px">■ Stop</button>
+  </div>
 </header>
 
-<div class="controls">
-  <input type="text" id="focusInput" placeholder="Focus area (e.g. 'liquidity exhaustion', 'volume anomaly', or leave blank for auto)" />
-  <button id="startBtn" onclick="startSession()">▶ Start</button>
-  <button id="stopBtn" onclick="stopSession()" disabled>■ Stop</button>
-</div>
+<div class="grid" id="mainGrid">
 
-<div class="stats">
-  <div class="stat-card"><div class="stat-label">Cycle</div><div class="stat-value" id="statCycle">—</div></div>
-  <div class="stat-card"><div class="stat-label">Passed</div><div class="stat-value" id="statPassed" style="color:var(--green)">0</div></div>
-  <div class="stat-card"><div class="stat-label">Failed</div><div class="stat-value" id="statFailed" style="color:var(--red)">0</div></div>
-  <div class="stat-card"><div class="stat-label">Status</div><div class="stat-value" id="statStatus" style="font-size:14px;padding-top:4px">—</div></div>
-</div>
+  <!-- Sidebar -->
+  <div class="sidebar" id="sidebar">
 
-<div class="feed">
-  <div class="feed-title">Live Alpha Feed</div>
-  <div id="alphaFeed">
-    <div class="empty" id="emptyState">
-      ⬡<p>No alphas yet. Start a session to begin autonomous research.</p>
+    <!-- Stats -->
+    <div class="card">
+      <div class="card-title">Session</div>
+      <div class="stat-row"><span class="stat-label">Cycle</span><span class="stat-val" id="sCycle">—</span></div>
+      <div class="stat-row"><span class="stat-label">Passed</span><span class="stat-val" id="sPassed">0</span></div>
+      <div class="stat-row"><span class="stat-label">Mutation</span><span class="stat-val" id="sMut">—</span></div>
+      <div class="stat-row"><span class="stat-label">BRAIN ID</span><span class="stat-val" id="sBrainId" style="font-size:10px">—</span></div>
     </div>
+
+    <!-- Metrics -->
+    <div class="card">
+      <div class="card-title">Latest BRAIN Metrics</div>
+      <div class="metric-grid">
+        <div class="metric-box">
+          <div class="metric-name">SHARPE</div>
+          <div class="metric-value na" id="mSharpe">—</div>
+          <div class="metric-limit">gate ≥ 1.25</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-name">FITNESS</div>
+          <div class="metric-value na" id="mFitness">—</div>
+          <div class="metric-limit">gate &gt; 1.0</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-name">TURNOVER</div>
+          <div class="metric-value na" id="mTurnover">—</div>
+          <div class="metric-limit">1%–70%</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-name">RETURNS</div>
+          <div class="metric-value na" id="mReturns">—</div>
+          <div class="metric-limit">annualized</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- BRAIN checks -->
+    <div class="card">
+      <div class="card-title">BRAIN Gate Checks</div>
+      <div id="checksPanel"><div style="color:var(--muted);font-size:12px">No simulation yet</div></div>
+    </div>
+
+    <!-- Mutation progress -->
+    <div class="card" id="mutCard" style="display:none">
+      <div class="card-title">Improvement Loop</div>
+      <div class="mutation-bar">
+        <div class="mutation-label">
+          <span id="mutLabel">Mutation 0/20</span>
+          <span id="mutPct" style="color:var(--blue)">0%</span>
+        </div>
+        <div class="bar-track"><div class="bar-fill" id="mutBar" style="width:0%"></div></div>
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:var(--muted)" id="mutFix">Waiting…</div>
+    </div>
+
+    <!-- Current expression -->
+    <div class="card">
+      <div class="card-title">Current Expression</div>
+      <div class="expr-box" id="exprBox">No alpha generated yet</div>
+    </div>
+
+  </div>
+
+  <!-- Main panel -->
+  <div class="main-panel" id="mainPanel">
+
+    <!-- Start screen -->
+    <div class="start-screen" id="startScreen">
+      <div style="font-size:40px">🧠</div>
+      <h2>OpenAlpha-Quant</h2>
+      <p>Autonomous WorldQuant BRAIN alpha researcher.<br>Generates, submits, improves until all BRAIN checks pass.</p>
+      <div class="input-row">
+        <input type="text" id="focusInput" placeholder="Focus area (e.g. price momentum, short squeeze…)" value="price volume momentum"/>
+        <button class="btn" onclick="startSession()">▶ Start</button>
+      </div>
+    </div>
+
+    <!-- Live dashboard (hidden until session starts) -->
+    <div style="display:none;flex:1;flex-direction:column;overflow:hidden" id="liveDash">
+      <div class="session-bar">
+        <span style="font-size:12px;color:var(--muted)">Session:</span>
+        <span class="session-id" id="sessionIdDisplay">—</span>
+        <button class="btn" onclick="showStartScreen()" style="padding:5px 12px;font-size:11px;background:var(--bg3);border:1px solid var(--border2);color:var(--muted)">+ New</button>
+      </div>
+      <div class="log-header">
+        <div class="log-title">⚡ Activity Log</div>
+        <div class="log-controls">
+          <div class="log-btn active" id="fAll" onclick="setFilter('ALL')">All</div>
+          <div class="log-btn" id="fBRAIN" onclick="setFilter('BRAIN')">BRAIN</div>
+          <div class="log-btn" id="fMUTATE" onclick="setFilter('MUTATE')">Mutations</div>
+          <div class="log-btn" id="fERROR" onclick="setFilter('ERROR')">Errors</div>
+          <div class="log-btn" onclick="clearLog()">Clear</div>
+        </div>
+      </div>
+      <div class="log-body" id="logBody"></div>
+    </div>
+
   </div>
 </div>
 
-<footer id="footer">OpenAlpha - Quant · session: <span id="footerSid">none</span> · <span id="footerTs">—</span></footer>
-
 <script>
-const API = '';
-let sessionId = localStorage.getItem('af_session_id') || null;
+let sessionId = null;
 let pollInterval = null;
-let knownAlphaIds = new Set();
-let failCount = 0;
+let logFilter = 'ALL';
+let autoScroll = true;
+let lastLogCount = 0;
+let latestChecks = [];
 
-const STATUS_COLORS = {
-  IDLE:'#666', GENERATING:'var(--amber)', PARSING:'var(--amber)',
-  VALIDATING:'var(--amber)', ITERATING:'var(--amber)',
-  PASS:'var(--green)', FAIL:'var(--red)',
-  STOPPED:'#666', ERROR:'var(--red)',
-};
+function setFilter(f) {
+  logFilter = f;
+  ['All','BRAIN','MUTATE','ERROR'].forEach(x => {
+    document.getElementById('f' + (x==='All'?'All':x)).classList.remove('active');
+  });
+  document.getElementById('f' + f).classList.add('active');
+  renderLog(window._allLogs || []);
+}
 
-// ── Session Management ────────────────────────────────────────────────────────
-async function startSession() {
-  const focus = document.getElementById('focusInput').value.trim() || 'auto';
-  try {
-    const resp = await fetch(`${API}/session/start`, {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({focus_area: focus}),
-    });
-    const data = await resp.json();
-    if (!resp.ok) { alert('Error: ' + (data.detail || JSON.stringify(data))); return; }
-    sessionId = data.session_id;
-    localStorage.setItem('af_session_id', sessionId);
-    knownAlphaIds.clear();
-    failCount = 0;
-    document.getElementById('footerSid').textContent = sessionId;
-    document.getElementById('startBtn').disabled = true;
-    document.getElementById('stopBtn').disabled = false;
-    document.getElementById('emptyState').style.display = 'none';
+function clearLog() {
+  document.getElementById('logBody').innerHTML = '';
+  window._allLogs = [];
+}
+
+function startSession() {
+  const focus = document.getElementById('focusInput').value || 'price volume momentum';
+  fetch('/session/start', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({focus_area: focus})
+  })
+  .then(r => r.json())
+  .then(d => {
+    sessionId = d.session_id;
+    document.getElementById('startScreen').style.display = 'none';
+    document.getElementById('liveDash').style.display = 'flex';
+    document.getElementById('sessionIdDisplay').textContent = sessionId;
+    document.getElementById('stopBtn').style.display = 'block';
+    window._allLogs = [];
+    lastLogCount = 0;
     startPolling();
-  } catch (e) { alert('Failed to start session: ' + e.message); }
+  });
 }
 
-async function stopSession() {
+function showStartScreen() {
+  document.getElementById('startScreen').style.display = 'flex';
+  document.getElementById('liveDash').style.display = 'none';
+  document.getElementById('stopBtn').style.display = 'none';
+  stopPolling();
+  sessionId = null;
+}
+
+function stopSession() {
   if (!sessionId) return;
-  try {
-    await fetch(`${API}/session/${sessionId}/stop`, {method:'POST'});
-    stopPolling();
-    document.getElementById('startBtn').disabled = false;
-    document.getElementById('stopBtn').disabled = true;
-    setStatus('STOPPED');
-  } catch (e) { console.error(e); }
+  fetch(`/session/${sessionId}/stop`, {method:'POST'});
 }
 
-// ── Polling ───────────────────────────────────────────────────────────────────
 function startPolling() {
   if (pollInterval) clearInterval(pollInterval);
-  pollInterval = setInterval(fetchStatus, 2000);
-  fetchStatus();
+  pollInterval = setInterval(pollSession, 2000);
+  pollSession();
 }
 
 function stopPolling() {
-  if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+  if (pollInterval) clearInterval(pollInterval);
+  pollInterval = null;
 }
 
-async function fetchStatus() {
+function pollSession() {
   if (!sessionId) return;
-  try {
-    const resp = await fetch(`${API}/session/${sessionId}`);
-    if (!resp.ok) return;
-    const state = await resp.json();
-    updateUI(state);
-    if (['STOPPED','ERROR'].includes(state.status)) {
-      stopPolling();
-      document.getElementById('startBtn').disabled = false;
-      document.getElementById('stopBtn').disabled = true;
-    }
-  } catch (e) { console.warn('Poll error:', e); }
+  fetch(`/session/${sessionId}`)
+    .then(r => r.json())
+    .then(updateDashboard)
+    .catch(() => {});
 }
 
-// ── UI Updates ────────────────────────────────────────────────────────────────
-function updateUI(state) {
-  document.getElementById('statCycle').textContent = state.cycle || '—';
-  document.getElementById('statPassed').textContent = (state.passed_alphas || []).length;
-
-  // Calculate fail count as (cycles - passes - 1) approx
-  const passed = (state.passed_alphas || []).length;
-  document.getElementById('statFailed').textContent = Math.max(0, (state.cycle || 0) - passed);
-  document.getElementById('statStatus').textContent = state.status;
-  setStatus(state.status);
-
-  const ts = state.created_at ? new Date(state.created_at).toLocaleString() : '—';
-  document.getElementById('footerTs').textContent = ts;
-  document.getElementById('footerSid').textContent = sessionId || 'none';
-
-  // Render new alphas (newest first)
-  const alphas = [...(state.passed_alphas || [])].reverse();
-  for (const alpha of alphas) {
-    if (!knownAlphaIds.has(alpha.alpha_id)) {
-      knownAlphaIds.add(alpha.alpha_id);
-      prependAlphaCard(alpha);
-    }
-  }
-
-  if (knownAlphaIds.size > 0) {
-    document.getElementById('emptyState').style.display = 'none';
-  }
-}
-
-function setStatus(status) {
+function updateDashboard(data) {
+  // Status badge
+  const status = (data.status || 'idle').toLowerCase();
   const badge = document.getElementById('statusBadge');
-  badge.textContent = status;
-  badge.style.color = STATUS_COLORS[status] || '#666';
-  badge.style.borderColor = STATUS_COLORS[status] || '#2a2a2a';
-}
+  badge.textContent = status.toUpperCase().replace('_', ' ');
+  badge.className = `status-badge badge-${status}`;
 
-// ── Alpha Card Rendering ──────────────────────────────────────────────────────
-function prependAlphaCard(alpha) {
-  const feed = document.getElementById('alphaFeed');
-  const empty = document.getElementById('emptyState');
-  if (empty) empty.style.display = 'none';
+  // Stats
+  document.getElementById('sCycle').textContent = data.cycle || '—';
+  document.getElementById('sPassed').textContent = (data.passed_alphas || []).length;
+  document.getElementById('sMut').textContent =
+    data.brain_mutation_count > 0 ? `${data.brain_mutation_count}/20` : '—';
+  document.getElementById('sBrainId').textContent = data.current_brain_alpha_id || '—';
 
-  const m = alpha.metrics || {};
-  const fp = alpha.fingerprint || {};
-  const isSubmit = alpha.decision === 'SUBMIT CANDIDATE';
-  const cardClass = isSubmit ? 'submit' : 'advance';
-  const badgeClass = isSubmit ? 'badge-submit' : 'badge-advance';
-  const badgeLabel = isSubmit ? 'SUBMIT ✓' : 'TEST ▶';
-
-  const sharpe = fmt(m.sharpe_min, m.sharpe_max);
-  const turnover = fmtPct(m.turnover_min, m.turnover_max);
-  const fitness = fmt(m.fitness_min, m.fitness_max);
-  const corrRisk = (m.corr_risk || '').toUpperCase();
-  const corrClass = corrRisk === 'LOW' ? 'badge-corr-low' : corrRisk === 'HIGH' ? 'badge-corr-high' : 'badge-corr-med';
-  const ts = alpha.timestamp ? new Date(alpha.timestamp).toLocaleTimeString() : '';
-  const family = alpha.family || '';
-
-  const id = 'card_' + alpha.alpha_id.replace(/\W/g,'');
-
-  const card = document.createElement('div');
-  card.className = `alpha-card ${cardClass}`;
-  card.id = id;
-  card.innerHTML = `
-    <div class="alpha-header" onclick="toggleCard('${id}')">
-      <div style="display:flex;align-items:center;gap:10px;">
-        <span class="alpha-id">${esc(alpha.alpha_id)}</span>
-        <span class="badge ${badgeClass}">${badgeLabel}</span>
-        ${family ? `<span class="badge badge-family">${esc(family)}</span>` : ''}
-        <span class="badge ${corrClass}">${corrRisk || '—'}</span>
-      </div>
-      <div style="display:flex;align-items:center;gap:12px;">
-        <span class="ts">${ts} · cycle ${alpha.cycle_num}</span>
-        <span class="chevron" id="chev_${id}">▼</span>
-      </div>
-    </div>
-    <div class="alpha-metrics-row">
-      <div class="mini-metric"><div class="mini-label">Sharpe</div><div class="mini-value">${sharpe}</div></div>
-      <div class="mini-metric"><div class="mini-label">Fitness</div><div class="mini-value" style="color:var(--blue)">${fitness}</div></div>
-      <div class="mini-metric"><div class="mini-label">Turnover</div><div class="mini-value" style="color:var(--amber)">${turnover}</div></div>
-    </div>
-    <div class="collapsible" id="body_${id}">
-      <div class="section-label">FAST EXPRESSION</div>
-      <pre class="expression">${esc(alpha.expression || '—')}</pre>
-      <div class="section-label">STRUCTURAL FINGERPRINT</div>
-      <table class="fp-table">
-        <tr><td>Dataset</td><td>${esc(fp.dataset||'—')}</td></tr>
-        <tr><td>Topology</td><td>${esc(fp.topology||'—')}</td></tr>
-        <tr><td>Temporal</td><td>${esc(fp.temporal||'—')}</td></tr>
-        <tr><td>Normalization</td><td>${esc(fp.normalization||'—')}</td></tr>
-        <tr><td>Direction</td><td>${esc(fp.direction||'—')}</td></tr>
-        <tr><td>Neutral</td><td>${esc(fp.neutral||'—')}</td></tr>
-      </table>
-      <div class="section-label">RATIONALE</div>
-      <div style="padding:6px 16px 14px;font-size:12px;color:#aaa;line-height:1.7;">${esc(alpha.rationale||'—')}</div>
-    </div>
-  `;
-  // Insert at top (newest first)
-  const firstCard = feed.querySelector('.alpha-card');
-  if (firstCard) feed.insertBefore(card, firstCard);
-  else feed.appendChild(card);
-}
-
-function toggleCard(id) {
-  const body = document.getElementById('body_' + id);
-  const chev = document.getElementById('chev_' + id);
-  if (!body) return;
-  body.classList.toggle('open');
-  chev.classList.toggle('open');
-}
-
-// ── Utils ─────────────────────────────────────────────────────────────────────
-function esc(s) {
-  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-function fmt(lo, hi) {
-  if (lo == null) return '—';
-  return hi && hi !== lo ? `${lo}–${hi}` : String(lo);
-}
-function fmtPct(lo, hi) {
-  if (lo == null) return '—';
-  return hi && hi !== lo ? `${lo}–${hi}%` : `${lo}%`;
-}
-
-// ── Resume on page reload ──────────────────────────────────────────────────────
-window.addEventListener('load', () => {
-  if (sessionId) {
-    document.getElementById('footerSid').textContent = sessionId;
-    fetchStatus().then(() => startPolling());
-    document.getElementById('stopBtn').disabled = false;
-    document.getElementById('startBtn').disabled = false;
+  // Metrics from latest passed alpha
+  const pa = data.passed_alphas || [];
+  if (pa.length > 0) {
+    const latest = pa[pa.length - 1];
+    const br = latest.brain;
+    if (br) updateMetrics(br);
   }
+
+  // Activity log
+  const logs = data.activity_log || [];
+  if (logs.length !== lastLogCount) {
+    window._allLogs = logs;
+    lastLogCount = logs.length;
+    renderLog(logs);
+  }
+
+  // Mutation bar
+  const mc = data.brain_mutation_count || 0;
+  const mutCard = document.getElementById('mutCard');
+  if (mc > 0) {
+    mutCard.style.display = 'block';
+    const pct = Math.round(mc / 20 * 100);
+    document.getElementById('mutLabel').textContent = `Mutation ${mc}/20`;
+    document.getElementById('mutPct').textContent = `${pct}%`;
+    document.getElementById('mutBar').style.width = `${pct}%`;
+  } else {
+    mutCard.style.display = 'none';
+  }
+
+  // Expression from latest log
+  const mutLogs = logs.filter(l => l.type === 'LLM' || l.type === 'SUBMIT');
+  if (mutLogs.length > 0) {
+    const last = mutLogs[mutLogs.length - 1];
+    const expr = (last.detail && last.detail.expression) || (last.detail && last.detail.expr) || '';
+    if (expr) document.getElementById('exprBox').textContent = expr;
+  }
+
+  // BRAIN checks from latest BRAIN_FAIL/BRAIN_PASS logs
+  const checkLogs = logs.filter(l => l.type === 'BRAIN_FAIL' || l.type === 'BRAIN_PASS' || l.type === 'METRICS');
+  updateChecksPanel(logs);
+
+  if (status === 'stopped' || status === 'error') stopPolling();
+}
+
+function updateMetrics(br) {
+  const fmt = (v, pct) => v == null ? '—' : (pct ? v.toFixed(1)+'%' : v.toFixed(3));
+  const setM = (id, val, good) => {
+    const el = document.getElementById(id);
+    el.textContent = val === '—' ? '—' : val;
+    el.className = 'metric-value ' + (val === '—' ? 'na' : good ? 'good' : 'bad');
+  };
+  const s = br.real_sharpe, f = br.real_fitness, t = br.real_turnover, r = br.real_returns;
+  setM('mSharpe',  fmt(s), s != null && s >= 1.25);
+  setM('mFitness', fmt(f), f != null && f > 1.0);
+  setM('mTurnover',fmt(t, true), t != null && t >= 1 && t <= 70);
+  setM('mReturns', fmt(r, true), r != null && r > 0);
+}
+
+function updateChecksPanel(logs) {
+  const checkMap = {};
+  logs.forEach(l => {
+    if (l.type === 'BRAIN_FAIL' && l.detail && l.detail.check) {
+      checkMap[l.detail.check] = {result:'FAIL', value: l.detail.value, limit: l.detail.limit};
+    }
+    if (l.type === 'BRAIN_PASS') {
+      // clear fails on pass
+      Object.keys(checkMap).forEach(k => { checkMap[k] = {result:'PASS'}; });
+    }
+  });
+
+  const panel = document.getElementById('checksPanel');
+  if (Object.keys(checkMap).length === 0) {
+    panel.innerHTML = '<div style="color:var(--muted);font-size:12px">Waiting for simulation…</div>';
+    return;
+  }
+
+  panel.innerHTML = Object.entries(checkMap).map(([name, chk]) => {
+    const icon = chk.result === 'PASS' ? '✅' : chk.result === 'FAIL' ? '❌' : '⏳';
+    const vals = chk.value != null ? `${chk.value} / ${chk.limit}` : '';
+    return `<div class="check-row">
+      <span class="check-icon">${icon}</span>
+      <span class="check-name">${name}</span>
+      <span class="check-vals">${vals}</span>
+    </div>`;
+  }).join('');
+}
+
+function renderLog(logs) {
+  const body = document.getElementById('logBody');
+  const filtered = logs.filter(l => {
+    if (logFilter === 'ALL') return true;
+    if (logFilter === 'BRAIN') return l.type.startsWith('BRAIN') || l.type === 'METRICS' || l.type === 'SUBMIT' || l.type === 'PATCH';
+    if (logFilter === 'MUTATE') return l.type === 'MUTATE' || l.type === 'LLM' || l.type === 'PATCH';
+    if (logFilter === 'ERROR') return l.type === 'ERROR' || l.type === 'BRAIN_ERROR' || l.type === 'BRAIN_FAIL';
+    return true;
+  });
+
+  body.innerHTML = filtered.map(l => {
+    const typeClass = 't-' + l.type;
+    return `<div class="log-entry ${typeClass}">
+      <span class="log-time">${l.time || ''}</span>
+      <span class="log-type">${l.type}</span>
+      <span class="log-msg">${escHtml(l.message || '')}</span>
+    </div>`;
+  }).join('');
+
+  if (autoScroll) body.scrollTop = body.scrollHeight;
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// Auto-scroll toggle
+document.addEventListener('DOMContentLoaded', () => {
+  const lb = document.getElementById('logBody');
+  lb.addEventListener('scroll', () => {
+    autoScroll = lb.scrollTop + lb.clientHeight >= lb.scrollHeight - 30;
+  });
 });
 </script>
 </body>

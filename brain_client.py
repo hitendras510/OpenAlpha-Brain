@@ -212,6 +212,96 @@ async def submit_and_poll(
         )
 
 
+async def patch_alpha_and_poll(
+    alpha_id: str,
+    new_expression: str,
+    simulation_payload: dict,
+    cookies: httpx.Cookies,
+    max_poll_seconds: int = 300,
+) -> BrainGateResult:
+    """
+    Update an existing BRAIN alpha with a new expression, then re-simulate it.
+
+    PATCH /alphas/{id} updates the alpha record (confirmed format: regular as dict).
+    Then POST /simulations re-runs the backtest and returns real gate results.
+    """
+    async with httpx.AsyncClient(
+        cookies=cookies, timeout=httpx.Timeout(30.0), follow_redirects=True
+    ) as client:
+        # ── 1. PATCH alpha expression ────────────────────────────────────────
+        patch_payload = {
+            "regular": {"code": new_expression}
+        }
+        patch_resp = await client.patch(
+            f"{BRAIN_BASE}/alphas/{alpha_id}", json=patch_payload
+        )
+        if patch_resp.status_code == 200:
+            logger.info("[brain] Patched alpha %s with new expression", alpha_id)
+        elif patch_resp.status_code == 400:
+            body = _safe_json(patch_resp) or {}
+            logger.warning("[brain] PATCH alpha %s returned 400: %s", alpha_id, body)
+            # Fall through — still attempt new simulation
+        else:
+            logger.warning(
+                "[brain] PATCH alpha %s returned HTTP %d — proceeding with new simulation",
+                alpha_id, patch_resp.status_code,
+            )
+
+        # ── 2. Submit new simulation with updated expression ─────────────────
+        # Build payload from simulation_payload, updating expression
+        payload = dict(simulation_payload)
+        payload["regular"] = new_expression
+
+        sim_resp = await client.post(f"{BRAIN_BASE}/simulations", json=payload)
+        if sim_resp.status_code == 429:
+            detail = (_safe_json(sim_resp) or {}).get("detail", "")
+            raise BrainSubmitError(f"Rate limited: {detail}")
+        if sim_resp.status_code not in (200, 201, 202):
+            body = _safe_json(sim_resp)
+            msg = (body or {}).get("detail", sim_resp.text[:200])
+            raise BrainSubmitError(f"Simulation submit failed HTTP {sim_resp.status_code}: {msg}")
+
+        location = sim_resp.headers.get("Location", "")
+        if not location:
+            result_data = _safe_json(sim_resp) or {}
+            return _extract_gate_result(result_data)
+        if location.startswith("/"):
+            location = BRAIN_BASE + location
+
+        logger.info("[brain] Improvement simulation submitted → polling: %s", location)
+
+        # ── 3. Poll until done ───────────────────────────────────────────────
+        elapsed = 0
+        poll_count = 0
+        while elapsed < max_poll_seconds:
+            poll_resp = await client.get(location)
+            if poll_resp.status_code == 200:
+                data = _safe_json(poll_resp) or {}
+                try:
+                    retry_after = float(poll_resp.headers.get("Retry-After", "0"))
+                except ValueError:
+                    retry_after = 0.0
+                if retry_after == 0:
+                    logger.info("[brain] Improvement simulation complete after %ds", elapsed)
+                    return _extract_gate_result(data)
+                wait = min(retry_after, 30.0)
+                await asyncio.sleep(wait)
+                elapsed += wait
+                poll_count += 1
+            elif poll_resp.status_code == 429:
+                wait = float(poll_resp.headers.get("Retry-After", "10"))
+                await asyncio.sleep(wait)
+                elapsed += wait
+            else:
+                raise BrainPollError(
+                    f"Poll HTTP {poll_resp.status_code}: {poll_resp.text[:100]}"
+                )
+
+        raise BrainPollError(
+            f"Improvement simulation did not complete within {max_poll_seconds}s"
+        )
+
+
 def _extract_gate_result(data: dict) -> BrainGateResult:
     """
     Parse BRAIN simulation/alpha result JSON into a BrainGateResult.

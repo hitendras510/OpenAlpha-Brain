@@ -109,6 +109,7 @@ class SessionState(BaseModel):
     rejected_motifs: List[dict] = []       # fingerprints that caused REJECT
     conversation_history: List[dict] = []  # [{role, content}] for LLM context
     mutation_count: int = 0                # mutations on the current alpha
+    brain_mutation_count: int = 0          # BRAIN improvement attempts on current alpha
     stop_requested: bool = False
     last_decision: Optional[str] = None
     consecutive_same_decision: int = 0
@@ -118,6 +119,9 @@ class SessionState(BaseModel):
     dataset_usage: dict = {}              # {family_name: count}
     failure_catalog: List[dict] = []      # [{fingerprint, failure_type, mutation_tried}]
     open_frontiers: List[dict] = []       # unexplored 5-dim fingerprint combos
+    # v3: live activity log for UI display
+    activity_log: List[dict] = []         # [{time, type, message, detail}]
+    current_brain_alpha_id: Optional[str] = None  # BRAIN alpha being improved
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
