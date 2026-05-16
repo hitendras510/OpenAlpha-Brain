@@ -60,6 +60,7 @@ class BrainGateResult:
     margin: Optional[float]        = None
     failures: list[str]            = field(default_factory=list)
     warnings: list[str]            = field(default_factory=list)
+    brain_checks: list[dict]       = field(default_factory=list)  # raw checks[] from BRAIN
     alpha_id: Optional[str]        = None   # BRAIN alpha ID after submission
     simulation_status: str         = "UNKNOWN"
 
@@ -213,9 +214,11 @@ async def submit_and_poll(
 
 def _extract_gate_result(data: dict) -> BrainGateResult:
     """
-    Parse BRAIN simulation result JSON into a BrainGateResult.
-    Handles ERROR status (unknown variable, syntax error, etc.) as gate FAIL.
-    Runs all IQC hard gates on real (not estimated) metrics.
+    Parse BRAIN simulation/alpha result JSON into a BrainGateResult.
+    
+    BRAIN API returns simulation results with the alpha registered under data["alpha"].
+    Real metrics are under data["is"] (in-sample).
+    Gate checks are under data["is"]["checks"].
     """
     import math
 
@@ -223,10 +226,11 @@ def _extract_gate_result(data: dict) -> BrainGateResult:
     warnings: list[str] = []
 
     sim_status = data.get("status", "UNKNOWN")
-    alpha_id   = data.get("alpha") or data.get("id") or data.get("alphaId")
+    # Alpha ID is in "alpha" field of simulation result, or "id" of alpha record
+    alpha_id   = data.get("alpha") or data.get("id")
     error_msg  = data.get("message", "")
 
-    # ── Handle ERROR status (e.g. unknown variable, syntax error) ───────────
+    # ── Handle ERROR status (unknown variable, syntax error, etc.) ───────────
     if sim_status == "ERROR":
         failure_msg = f"BRAIN simulation ERROR: {error_msg[:200]}"
         logger.warning("[brain] %s", failure_msg)
@@ -238,76 +242,75 @@ def _extract_gate_result(data: dict) -> BrainGateResult:
             simulation_status=sim_status,
         )
 
-    # ── Extract real metrics ─────────────────────────────────────────────────
-    # BRAIN result structure: metrics under 'is' (in-sample) key
-    stats    = data.get("is", data.get("stats", {})) or {}
+    # ── Extract real metrics from "is" (in-sample) section ──────────────────
+    # Confirmed field names from live BRAIN API response
+    is_data = data.get("is", {}) or {}
 
-    sharpe   = _get_float(stats, ["sharpe", "sharpeRatio", "is_sharpe"])
-    fitness  = _get_float(stats, ["fitness", "is_fitness"])
-    turnover = _get_float(stats, ["turnover", "is_turnover"])
-    returns  = _get_float(stats, ["returns", "is_returns", "annualizedReturn"])
-    drawdown = _get_float(stats, ["drawdown", "maxDrawdown"])
-    margin   = _get_float(stats, ["margin", "is_margin"])
+    sharpe   = _get_float(is_data, ["sharpe"])
+    fitness  = _get_float(is_data, ["fitness"])
+    turnover = _get_float(is_data, ["turnover"])   # decimal (0.35 = 35%)
+    returns  = _get_float(is_data, ["returns"])    # decimal (-0.12 = -12%)
+    drawdown = _get_float(is_data, ["drawdown"])
+    margin   = _get_float(is_data, ["margin"])
 
-    # Compute fitness from real numbers if not returned directly
-    if fitness is None and sharpe is not None and returns is not None and turnover is not None:
-        returns_dec  = abs(returns) / 100.0
-        turnover_dec = turnover / 100.0
-        denom        = max(turnover_dec, 0.125)
-        fitness      = sharpe * math.sqrt(returns_dec) / denom
+    # Convert decimal turnover to percentage for consistency with our gates
+    turnover_pct = (turnover * 100) if turnover is not None else None
+    returns_pct  = (returns  * 100) if returns  is not None else None
 
-    # ── Gate checks on REAL metrics ─────────────────────────────────────────
-    if sharpe is None:
-        warnings.append("Sharpe not returned by BRAIN (check simulation completed)")
-    elif sharpe < GATE_SHARPE_MIN:
-        failures.append(
-            f"REAL Sharpe {sharpe:.3f} < {GATE_SHARPE_MIN} — BRAIN gate FAIL"
-        )
-    elif sharpe < 1.35:
-        warnings.append(f"REAL Sharpe {sharpe:.3f} marginal — target >1.35")
+    # ── Parse BRAIN's own gate checks[] array ────────────────────────────────
+    brain_checks = is_data.get("checks", [])
+    for chk in brain_checks:
+        name   = chk.get("name", "")
+        result = chk.get("result", "")
+        value  = chk.get("value")
+        limit  = chk.get("limit")
 
-    if fitness is None:
-        warnings.append("Fitness not returned (or could not be computed)")
-    elif fitness <= GATE_FITNESS_MIN:
-        failures.append(
-            f"REAL Fitness {fitness:.3f} ≤ {GATE_FITNESS_MIN} — BRAIN gate FAIL"
-        )
-
-    if turnover is None:
-        warnings.append("Turnover not returned by BRAIN")
-    else:
-        if turnover < GATE_TURNOVER_MIN:
+        if result == "FAIL":
             failures.append(
-                f"REAL Turnover {turnover:.1f}% < {GATE_TURNOVER_MIN}% — BRAIN gate FAIL"
+                f"BRAIN gate {name} FAIL: value={value} limit={limit}"
             )
-        if turnover > GATE_TURNOVER_MAX:
-            failures.append(
-                f"REAL Turnover {turnover:.1f}% > {GATE_TURNOVER_MAX}% — BRAIN gate FAIL"
-            )
+        elif result == "PENDING":
+            warnings.append(f"BRAIN gate {name} still PENDING (correlation check)")
 
-    passed = len(failures) == 0
-
+    # ── Log real metrics ──────────────────────────────────────────────────────
     logger.info(
-        "[brain] Gate check: passed=%s sharpe=%.3f fitness=%.3f turnover=%.1f%%",
-        passed,
-        sharpe  or 0.0,
-        fitness or 0.0,
-        turnover or 0.0,
+        "[brain] Simulation COMPLETE — sharpe=%.3f fitness=%.3f turnover=%.1f%% returns=%.1f%%",
+        sharpe   or 0.0,
+        fitness  or 0.0,
+        turnover_pct or 0.0,
+        returns_pct  or 0.0,
     )
+
+    # If BRAIN's own checks had failures → mark as FAIL
+    # If no checks returned (status != COMPLETE), use our gate thresholds
+    if not brain_checks and sharpe is not None:
+        if sharpe < GATE_SHARPE_MIN:
+            failures.append(f"REAL Sharpe {sharpe:.3f} < {GATE_SHARPE_MIN}")
+        if fitness is not None and fitness <= GATE_FITNESS_MIN:
+            failures.append(f"REAL Fitness {fitness:.3f} ≤ {GATE_FITNESS_MIN}")
+        if turnover_pct is not None:
+            if turnover_pct < GATE_TURNOVER_MIN:
+                failures.append(f"REAL Turnover {turnover_pct:.1f}% < {GATE_TURNOVER_MIN}%")
+            if turnover_pct > GATE_TURNOVER_MAX:
+                failures.append(f"REAL Turnover {turnover_pct:.1f}% > {GATE_TURNOVER_MAX}%")
+
     if failures:
         for f in failures:
             logger.warning("[brain] Gate FAIL: %s", f)
+
+    passed = len(failures) == 0
 
     return BrainGateResult(
         passed=passed,
         sharpe=sharpe,
         fitness=fitness,
-        turnover=turnover,
-        returns=returns,
+        turnover=turnover_pct,
+        returns=returns_pct,
         drawdown=drawdown,
         margin=margin,
         failures=failures,
         warnings=warnings,
+        brain_checks=brain_checks,       # pass raw checks[] through
         alpha_id=alpha_id,
         simulation_status=sim_status,
     )

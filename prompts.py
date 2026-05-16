@@ -335,19 +335,198 @@ def build_failure_feedback(
         )
     failures_list = "\n     - ".join(failures)
     return (
-        f"Alpha {cycle} failed validation.\n"
+        f"Alpha {cycle} failed local validation.\n"
         f"     Failed gates:\n     - {failures_list}\n"
         f"     Expression attempted:\n     {expression}\n"
         f"{values_str}\n"
         "     ELM Mutation Matrix — apply the EXACT fix for your failure type:\n"
         "       TURNOVER > 70%  → ts_decay_linear(expr, d), d=3→5→7→10\n"
         "       SHARPE < 1.25   → replace rank() with ts_zscore(x, window)\n"
-        "       FITNESS ≤ 1.0   → reduce turnover to 20-30% range (Fitness=S×sqrt(R)/max(TO,0.125))\n"
+        "       FITNESS ≤ 1.0   → reduce turnover to 20-30% range\n"
         "       CROWDED         → change topology OR pivot dataset family\n"
-        "       OVERFIT         → prune AST — remove outer operators\n"
-        "     Mutate ONLY the failing component. Do NOT change economic thesis.\n"
-        "     Output the full 8-field v2 format."
+        "       INVALID_VAR     → use ONLY: close, open, high, low, vwap, volume, adv20, returns, cap, analyst_rating, price_target, short_ratio, days_to_cover\n"
+        "     Mutate ONLY the failing component. Output the full 8-field v2 format."
     )
+
+
+# ── BRAIN check name → targeted ELM mutation instructions ────────────────────
+_BRAIN_CHECK_MUTATIONS: dict[str, str] = {
+    "LOW_SHARPE": (
+        "LOW_SHARPE (real Sharpe < 1.25):\n"
+        "  Root cause: signal-to-noise too low. The alpha is directionally wrong or too noisy.\n"
+        "  MANDATORY fixes (apply ALL):\n"
+        "    1. Replace rank() with ts_zscore(x, 20) — zscore is more stable cross-sectionally\n"
+        "    2. Add volatility normalization: divide signal by ts_std_dev(close, 20)\n"
+        "    3. Tighten neutralization: change industry → subindustry\n"
+        "    4. Use a different temporal structure — if you used short window (<10d), try medium (20-60d)\n"
+        "    5. Add regime conditioning: trade_when(volume > ts_mean(volume, 20), signal, 0)\n"
+        "  AVOID: simple ts_delta(close, N) — too crowded, near-zero Sharpe"
+    ),
+    "LOW_FITNESS": (
+        "LOW_FITNESS (real Fitness ≤ 1.0):\n"
+        "  Formula: Fitness = Sharpe × sqrt(|Returns|) / max(Turnover, 0.125)\n"
+        "  Root cause: Turnover too high OR Sharpe too low relative to returns.\n"
+        "  MANDATORY fix:\n"
+        "    - Wrap expression with ts_decay_linear(expr, 10) to cut turnover in half\n"
+        "    - Target turnover range: 15%-35% (currently likely >50%)\n"
+        "    - After decay, turnover should drop from ~35% → ~15-20%, doubling Fitness\n"
+        "  Example: group_neutralize(ts_decay_linear(YOUR_SIGNAL, 10), industry)"
+    ),
+    "HIGH_TURNOVER": (
+        "HIGH_TURNOVER (real Turnover > 70%):\n"
+        "  MANDATORY fix — apply ts_decay_linear with increasing d until TO < 70%:\n"
+        "    d=6 → d=10 → d=15 → d=20\n"
+        "  Outer wrap: group_neutralize(ts_decay_linear(YOUR_SIGNAL, 10), industry)\n"
+        "  Also consider longer lookback windows (20d → 60d)"
+    ),
+    "LOW_TURNOVER": (
+        "LOW_TURNOVER (real Turnover < 1%):\n"
+        "  Signal is too static — position barely changes day-to-day.\n"
+        "  MANDATORY fix:\n"
+        "    - Remove ts_decay_linear if present (or reduce d from 20 → 5)\n"
+        "    - Use shorter lookback windows (60d → 10d)\n"
+        "    - Use ts_delta() instead of ts_mean() as the outer operator"
+    ),
+    "LOW_SUB_UNIVERSE_SHARPE": (
+        "LOW_SUB_UNIVERSE_SHARPE (alpha underperforms within industry groups):\n"
+        "  Root cause: signal works market-wide but reverses within industry peers.\n"
+        "  This means the signal is capturing industry-level effects, not stock-specific alpha.\n"
+        "  MANDATORY fixes:\n"
+        "    1. Change neutralization from 'industry' → 'subindustry' in group_neutralize()\n"
+        "    2. Add a second layer: group_neutralize(ts_zscore(signal, 20), subindustry)\n"
+        "    3. Use INTERACTION effects: rank(signal_A) * rank(signal_B) where B is volume/returns\n"
+        "       This creates cross-sectional dispersion within industries\n"
+        "    4. Avoid pure price momentum — it's industry-correlated by nature"
+    ),
+    "CONCENTRATED_WEIGHT": (
+        "CONCENTRATED_WEIGHT (position weights too concentrated):\n"
+        "  MANDATORY fix:\n"
+        "    - Wrap with scale(): scale(group_neutralize(expr, industry), 1)\n"
+        "    - Add truncation in payload: truncation=0.05 (already set)\n"
+        "    - Add signed_power(expr, 0.5) to compress outliers before neutralize"
+    ),
+    "SELF_CORRELATION": (
+        "SELF_CORRELATION (too correlated with your existing alphas):\n"
+        "  Your existing alphas in BRAIN already capture this signal.\n"
+        "  MANDATORY fix — complete structural pivot:\n"
+        "    1. Change factor family entirely (if Price/Vol → use analyst_rating or price_target)\n"
+        "    2. Change topology (if Additive → Multiplicative, if Rank → ZScore)\n"
+        "    3. Change temporal structure (if Short <10d → Long >60d)\n"
+        "    4. Change neutralization scope (sector → subindustry)\n"
+        "  Must differ in at least 3 of 5 fingerprint dimensions from prior alphas"
+    ),
+    "BRAIN_SIMULATION_ERROR": (
+        "BRAIN SIMULATION ERROR — expression used an INVALID variable:\n"
+        "  ONLY these bare variable names exist in BRAIN FastExpr:\n"
+        "    close, open, high, low, vwap, volume, adv20, returns, cap,\n"
+        "    analyst_rating, price_target, short_ratio, days_to_cover\n"
+        "  NEVER USE: earnings, sales, assets, book, short_interest, institutional_ownership,\n"
+        "             eps_estimate, revenue_estimate, or any other variable not in the list above.\n"
+        "  Rewrite the expression using ONLY confirmed valid variables."
+    ),
+}
+
+
+def build_brain_failure_feedback(
+    brain_checks: list[dict],
+    expression: str,
+    cycle: int,
+    real_sharpe: float | None,
+    real_fitness: float | None,
+    real_turnover: float | None,
+    real_returns: float | None,
+    brain_alpha_id: str | None,
+    mutation_attempt: int = 1,
+    error_message: str = "",
+) -> str:
+    """
+    Build a highly targeted LLM feedback message from BRAIN's real gate check results.
+
+    Maps each failing BRAIN check name to a precise ELM mutation instruction.
+    The LLM receives exact real metrics + surgical fix instructions for each failure.
+    """
+    # Identify failed and pending checks
+    failed_checks  = [c for c in brain_checks if c.get("result") == "FAIL"]
+    pending_checks = [c for c in brain_checks if c.get("result") == "PENDING"]
+
+    # Build mutation instructions per failure
+    mutation_blocks = []
+
+    # Handle simulation error (bad variable name)
+    if error_message and "unknown variable" in error_message.lower():
+        mutation_blocks.append(_BRAIN_CHECK_MUTATIONS["BRAIN_SIMULATION_ERROR"])
+    elif error_message:
+        mutation_blocks.append(
+            f"BRAIN SIMULATION ERROR: {error_message[:200]}\n"
+            "  Fix the expression syntax and resubmit."
+        )
+
+    for chk in failed_checks:
+        name  = chk.get("name", "")
+        value = chk.get("value")
+        limit = chk.get("limit")
+        mutation = _BRAIN_CHECK_MUTATIONS.get(name)
+        if mutation:
+            # Inject real values into the instruction
+            block = f"▌ BRAIN CHECK FAILED: {name}\n"
+            if value is not None and limit is not None:
+                block += f"  Real value={value}  |  Required limit={limit}\n"
+            block += mutation
+            mutation_blocks.append(block)
+        else:
+            mutation_blocks.append(
+                f"▌ BRAIN CHECK FAILED: {name} (value={value}, limit={limit})\n"
+                "  Apply the most relevant ELM mutation from the matrix."
+            )
+
+    for chk in pending_checks:
+        mutation_blocks.append(
+            f"▌ BRAIN CHECK PENDING: {chk.get('name')} — will be evaluated after Sharpe/Fitness pass"
+        )
+
+    # Determine primary failure for headline
+    primary_failures = [c.get("name", "?") for c in failed_checks]
+
+    # Format real metrics
+    def fmt(v, pct=False):
+        if v is None: return "N/A"
+        return f"{v:.3f}" + ("%" if pct else "")
+
+    lines = [
+        f"━━━ BRAIN REAL SIMULATION RESULTS — Alpha {cycle} (mutation attempt {mutation_attempt}) ━━━",
+        f"Expression submitted: {expression[:100]}",
+        f"BRAIN Alpha ID      : {brain_alpha_id or 'n/a'}",
+        "",
+        "── REAL METRICS FROM WORLDQUANT BRAIN ──────────────────────────────",
+        f"  Sharpe   : {fmt(real_sharpe)}    (gate: ≥ 1.25)",
+        f"  Fitness  : {fmt(real_fitness)}    (gate: > 1.0)",
+        f"  Turnover : {fmt(real_turnover, pct=True)}  (gate: 1%-70%)",
+        f"  Returns  : {fmt(real_returns, pct=True)}",
+        "",
+        f"── FAILED BRAIN CHECKS: {', '.join(primary_failures) or 'SIMULATION ERROR'} ──────────────",
+        "",
+    ]
+
+    lines.extend(mutation_blocks)
+
+    lines += [
+        "",
+        "━━━ YOUR TASK ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        "Apply EXACTLY the mutations described above. Follow these rules:",
+        "  1. Fix the PRIMARY failure first (listed above)",
+        "  2. Use ONLY confirmed BRAIN variables: close, open, high, low, vwap,",
+        "     volume, adv20, returns, cap, analyst_rating, price_target,",
+        "     short_ratio, days_to_cover",
+        "  3. Keep group_neutralize() as the outer wrapper",
+        "  4. The fix must change the fundamental structure, not just the window size",
+        f"  5. This is mutation attempt {mutation_attempt} — if same failure persists after 2 attempts,",
+        "     abandon this alpha and ideate a completely different one",
+        "",
+        "Output the full 8-field v2 format with the mutated expression.",
+    ]
+
+    return "\n".join(lines)
+
 
 
 def build_success_feedback(

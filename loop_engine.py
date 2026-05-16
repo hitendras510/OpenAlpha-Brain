@@ -24,6 +24,7 @@ from models import (
 )
 from prompts import (
     SYSTEM_PROMPT,
+    build_brain_failure_feedback,
     build_failure_feedback,
     build_family_switch_warning,
     build_memory_injection,
@@ -379,33 +380,51 @@ async def run_loop(session_id: str) -> None:
                     break
 
             if brain_result.status == BrainSimStatus.FAIL:
-                # Real BRAIN gates failed — feed into LLM mutation loop
+                # ── Real BRAIN gates failed → targeted ELM mutation ───────────
                 logger.warning(
                     "[%s] cycle=%d BRAIN gates FAILED: %s",
                     session_id, global_cycle, brain_result.gate_failures,
                 )
                 state.status = SessionStatus.ITERATING
+
+                # Track how many times we've mutated this specific alpha
+                brain_mutation_attempt = getattr(state, "_brain_mutation_count", 0) + 1
+                state._brain_mutation_count = brain_mutation_attempt  # type: ignore[attr-defined]
+
                 state.failure_catalog.append({
                     "fingerprint": fingerprint_dict,
                     "failure_type": "BRAIN_GATE_FAIL",
                     "metric_value": {
-                        "sharpe": brain_result.real_sharpe,
-                        "fitness": brain_result.real_fitness,
+                        "sharpe":   brain_result.real_sharpe,
+                        "fitness":  brain_result.real_fitness,
                         "turnover": brain_result.real_turnover,
+                        "returns":  brain_result.real_returns,
                     },
+                    "mutation_attempt": brain_mutation_attempt,
+                    "brain_checks": brain_result.brain_checks,
                     "mutation_tried": "pending",
                 })
-                failure_msg = build_failure_feedback(
-                    failures=brain_result.gate_failures,
+
+                # Build targeted feedback from BRAIN's real check results
+                brain_checks  = brain_result.brain_checks or []
+                error_message = ""
+                # If no checks (simulation ERROR), extract error from gate_failures
+                if not brain_checks and brain_result.gate_failures:
+                    error_message = brain_result.gate_failures[0]
+
+                targeted_feedback = build_brain_failure_feedback(
+                    brain_checks=brain_checks,
                     expression=expression,
                     cycle=global_cycle,
-                    values={
-                        "real_sharpe": brain_result.real_sharpe,
-                        "real_fitness": brain_result.real_fitness,
-                        "real_turnover": brain_result.real_turnover,
-                    },
+                    real_sharpe=brain_result.real_sharpe,
+                    real_fitness=brain_result.real_fitness,
+                    real_turnover=brain_result.real_turnover,
+                    real_returns=brain_result.real_returns,
+                    brain_alpha_id=brain_result.alpha_id,
+                    mutation_attempt=brain_mutation_attempt,
+                    error_message=error_message,
                 )
-                state.conversation_history.append({"role": "user", "content": failure_msg})
+                state.conversation_history.append({"role": "user", "content": targeted_feedback})
                 await sm.save_session(state)
                 await asyncio.sleep(3)
                 continue
@@ -517,8 +536,10 @@ async def _submit_to_brain(alpha, session_id: str, cycle: int) -> "BrainSubmissi
         result.real_drawdown = gate.drawdown
         result.gate_failures = gate.failures
         result.gate_warnings = gate.warnings
+        result.brain_checks  = gate.brain_checks     # raw checks[] for targeted mutation
         result.completed_at  = dt.utcnow()
         result.status        = BrainSimStatus.PASS if gate.passed else BrainSimStatus.FAIL
+
 
     except brain_client.BrainAuthError as exc:
         logger.error("[%s] cycle=%d BRAIN auth error: %s", session_id, cycle, exc)

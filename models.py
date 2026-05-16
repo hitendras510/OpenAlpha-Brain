@@ -44,9 +44,11 @@ class BrainSubmissionResult(BaseModel):
     real_drawdown: Optional[float] = None
     gate_failures: List[str] = []
     gate_warnings: List[str] = []
+    brain_checks: List[dict] = []         # raw checks[] array from BRAIN response
     error_message: Optional[str] = None
     submitted_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+
 
 
 class AlphaMetrics(BaseModel):
